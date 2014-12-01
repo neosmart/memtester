@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -69,9 +70,9 @@ void check_posix_system(void) {
 #define check_posix_system()
 #endif
 
-#ifdef _SC_PAGE_SIZE
+#ifdef _SC_PAGESIZE
 int memtester_pagesize(void) {
-    int pagesize = sysconf(_SC_PAGE_SIZE);
+    int pagesize = sysconf(_SC_PAGESIZE);
     if (pagesize == -1) {
         perror("get page size failed");
         exit(EXIT_FAIL_NONSTARTER);
@@ -81,7 +82,7 @@ int memtester_pagesize(void) {
 }
 #else
 int memtester_pagesize(void) {
-    printf("sysconf(_SC_PAGE_SIZE) not supported; using pagesize of 8192\n");
+    printf("sysconf(_SC_PAGESIZE) not supported; using pagesize of 8192\n");
     return 8192;
 }
 #endif
@@ -135,6 +136,25 @@ int main(int argc, char **argv) {
     pagesize = memtester_pagesize();
     pagesizemask = (ptrdiff_t) ~(pagesize - 1);
     printf("pagesizemask is 0x%tx\n", pagesizemask);
+
+	struct rlimit rlim_data;
+	struct rlimit rlim_mlock;
+	struct rlimit rlim_inf = {RLIM_INFINITY, RLIM_INFINITY};
+
+	int RES_MLOCK = RLIMIT_MEMLOCK;
+	int RES_DATA = RLIMIT_RSS;
+
+	if ((getrlimit(RES_DATA, &rlim_data) < 0) || (getrlimit(RES_MLOCK, &rlim_mlock) < 0))
+	{
+		printf("Failed to get rlimit! Exiting...\n");
+		exit (-1);
+	}
+	printf("Current limits:\n RLIMIT_RSS %#81x\n RLIMIT_VMEM %#81x\nRaising limits...\n", (unsigned long) rlim_data.rlim_cur, (unsigned long) rlim_mlock.rlim_cur);
+
+	if ((setrlimit(RES_DATA, &rlim_inf) < 0) || (setrlimit(RES_MLOCK, &rlim_inf) < 0))
+	{
+		printf("Failed to set rlimit. Amount of memory testable may be limited!\n");
+	}
     
     /* If MEMTESTER_TEST_MASK is set, we use its value as a mask of which
        tests we run.
@@ -322,7 +342,7 @@ int main(int argc, char **argv) {
             if (mlock((void *) aligned, bufsize) < 0) {
                 switch(errno) {
                     case EAGAIN: /* BSDs */
-                        printf("over system/pre-process limit, reducing...\n");
+                        printf("over system/per-process limit, reducing...\n");
                         free((void *) buf);
                         buf = NULL;
                         wantbytes -= pagesize;
